@@ -1,37 +1,80 @@
+import requests
+from bs4 import BeautifulSoup
+from fake_useragent import UserAgent
+import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 def scrape_tcgplayer(search_term):
-    base_url = "https://www.tcgplayer.com/search/magic/product"
+    # Configure retry strategy
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+
+    # Updated headers with browser-like behavior
     ua = UserAgent()
-    
     headers = {
         'User-Agent': ua.random,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'DNT': '1',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.tcgplayer.com/',
+        'Connection': 'keep-alive'
     }
 
-    # Format search URL correctly
-    search_url = f"{base_url}?q={search_term.replace(' ', '+')}"
+    # Encoded search URL
+    search_url = f"https://www.tcgplayer.com/search/magic/product?q={requests.utils.quote(search_term)}&view=grid"
 
-    response = requests.get(search_url, headers=headers)
+    try:
+        response = session.get(search_url, headers=headers, timeout=15)
+        response.raise_for_status()
 
-    # ✅ Debugging: Print first 1000 characters of HTML response
-    print(response.text[:1000])  
+        # Debugging: Save HTML to file
+        with open("debug_page.html", "w", encoding="utf-8") as f:
+            f.write(response.text)
 
-    if response.status_code == 200:
         soup = BeautifulSoup(response.text, 'html.parser')
         cards = []
 
-        product_listings = soup.find_all('div', class_='search-result__content')
+        # Updated selector for 2023 layout
+        product_listings = soup.select('div.search-result[data-testid="search-result"]')
 
         for item in product_listings:
             try:
-                card = {
-                    'name': item.find('span', class_='search-result__title').get_text(strip=True),
-                    'price': item.find('span', class_='search-result__market-price').get_text(strip=True),
-                }
-                cards.append(card)
-            except AttributeError:
+                name = item.select_one('h2.search-result__title > a').get_text(strip=True)
+                price_section = item.select_one('div.search-result__market-price')
+                
+                # Handle multiple price scenarios
+                if price_section:
+                    price = price_section.select_one('span:not(.label)').get_text(strip=True)
+                else:
+                    price = "N/A"
+
+                cards.append({
+                    'name': name,
+                    'price': price.replace('Market Price\n', '').strip()
+                })
+            except (AttributeError, TypeError) as e:
+                print(f"Error parsing item: {e}")
                 continue
-        
+
         return cards
-    else:
+
+    except requests.exceptions.RequestException as e:
+        print(f"Request failed: {e}")
         return None
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
+
+# Usage example
+if __name__ == "__main__":
+    results = scrape_tcgplayer("Black Lotus")
+    if results:
+        print(f"Found {len(results)} cards:")
+        for card in results:
+            print(f"{card['name']}: {card['price']}")
