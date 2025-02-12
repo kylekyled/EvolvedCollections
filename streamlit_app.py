@@ -18,7 +18,7 @@ st.header("Search for Trading Card Prices")
 search_term = st.text_input("Enter the name of a trading card:")
 
 def scrape_tcgplayer(search_term):
-    base_url = "https://shop.tcgplayer.com"
+    base_url = "https://www.tcgplayer.com/search/magic/product"
     ua = UserAgent()
     
     headers = {
@@ -26,24 +26,26 @@ def scrape_tcgplayer(search_term):
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'DNT': '1',
     }
-    
-    search_url = urljoin(base_url, "/productcatalog/product/show")
-    params = {'ProductName': search_term, 'newSearch': 'true', 'sortBy': 'marketPrice'}
 
-    time.sleep(random.uniform(1, 3))  # Random delay to mimic human behavior
-    response = requests.get(search_url, params=params, headers=headers)
+    # Format search URL correctly
+    search_url = f"{base_url}?q={search_term.replace(' ', '+')}"
+
+    response = requests.get(search_url, headers=headers)
+    
+    # Debugging: Print first 1000 characters of the HTML response
+    print(response.text[:1000])  
 
     if response.status_code == 200:
-        soup = BeautifulSoup(response.text, 'lxml')
+        soup = BeautifulSoup(response.text, 'html.parser')
         cards = []
 
-        product_listings = soup.find_all('li', class_='product-list-item')
+        product_listings = soup.find_all('div', class_='search-result__content')
 
         for item in product_listings:
             try:
                 card = {
-                    'name': item.find('span', class_='product__name').get_text(strip=True),
-                    'price': item.find('span', class_='product__market-price--value').get_text(strip=True),
+                    'name': item.find('span', class_='search-result__title').get_text(strip=True),
+                    'price': item.find('span', class_='search-result__market-price').get_text(strip=True),
                 }
                 cards.append(card)
             except AttributeError:
